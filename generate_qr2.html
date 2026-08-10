@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Генератор QR-кодов</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: Arial; padding: 30px; max-width: 600px; margin: 0 auto; }
+        button { padding: 15px 30px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; }
+        button:disabled { background: #ccc; }
+        #status { margin-top: 20px; font-weight: bold; }
+        .hidden { position: absolute; left: -9999px; }
+    </style>
+</head>
+<body>
+    <h1>Скачать QR-коды спортсменов</h1>
+    <p>Нажми кнопку. ZIP-архив с PNG-файлами будет создан автоматически.</p>
+    <button id="download-btn">Скачать все QR-коды (ZIP)</button>
+    <div id="status"></div>
+    <div id="hidden-qr-container" class="hidden"></div>
+
+    <script>
+        // ВСТАВЬ СВОИ ДАННЫЕ ЗДЕСЬ (кавычки оставь)
+        const MY_SUPABASE_URL = 'https://cgqvdhsikjbpgtrikjsc.supabase.co'
+        const MY_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNncXZkaHNpa2picGd0cmlranNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwODkyMzEsImV4cCI6MjEwMTY2NTIzMX0.ITrdbGWe8FppPOvz5B9yIhobg8iy3lCl7-Q6m524Ijo'
+        
+        // Создаём клиент с новым именем
+        const sbClient = window.supabase.createClient(MY_SUPABASE_URL, MY_SUPABASE_KEY)
+        
+        const statusDiv = document.getElementById('status')
+        const downloadBtn = document.getElementById('download-btn')
+        const container = document.getElementById('hidden-qr-container')
+
+        async function downloadAllQRCodes() {
+            downloadBtn.disabled = true
+            statusDiv.textContent = 'Загружаю список спортсменов...'
+            
+            try {
+                const { data: athletes, error } = await sbClient
+                    .from('athletes')
+                    .select('*')
+                    .order('last_name')
+                
+                if (error) throw new Error('Ошибка базы данных: ' + error.message)
+                if (!athletes || athletes.length === 0) {
+                    statusDiv.textContent = '⚠️ В базе нет спортсменов. Добавь их и попробуй снова.'
+                    downloadBtn.disabled = false
+                    return
+                }
+
+                statusDiv.textContent = '✅ Найдено ' + athletes.length + ' спортсменов. Генерирую QR-коды...'
+                
+                const zip = new JSZip()
+                container.innerHTML = ''
+
+                for (let i = 0; i < athletes.length; i++) {
+                    const athlete = athletes[i]
+                    const qrDiv = document.createElement('div')
+                    qrDiv.id = 'temp-qr-' + athlete.id
+                    container.appendChild(qrDiv)
+                    
+                    new QRCode(qrDiv, {
+                        text: String(athlete.id),
+                        width: 400,
+                        height: 400,
+                        colorDark: "#000000",
+                        colorLight: "#ffffff",
+                        correctLevel: QRCode.CorrectLevel.H
+                    })
+
+                    await new Promise(resolve => setTimeout(resolve, 300))
+
+                    const canvas = qrDiv.querySelector('canvas')
+                    if (!canvas) continue
+
+                    const pngDataUrl = canvas.toDataURL('image/png')
+                    const pngBase64 = pngDataUrl.split(',')[1]
+
+                    const firstName = (athlete.first_name || 'без_имени').replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')
+                    const lastName = (athlete.last_name || 'без_фамилии').replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')
+                    const fileName = (i + 1) + '_' + lastName + '_' + firstName + '.png'
+
+                    zip.file(fileName, pngBase64, { base64: true })
+                    qrDiv.remove()
+                }
+
+                statusDiv.textContent = '📦 Формирую ZIP-архив...'
+                const zipBlob = await zip.generateAsync({ type: 'blob' })
+                
+                const url = URL.createObjectURL(zipBlob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = 'QR_codes_athletes.zip'
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+                URL.revokeObjectURL(url)
+                
+                statusDiv.textContent = '🎉 Готово! Скачано ' + athletes.length + ' QR-кодов.'
+                
+            } catch (err) {
+                console.error(err)
+                statusDiv.textContent = '❌ Ошибка: ' + err.message
+            } finally {
+                downloadBtn.disabled = false
+            }
+        }
+
+        // Вешаем обработчик кнопки через JavaScript, а не onclick в HTML
+        document.getElementById('download-btn').addEventListener('click', downloadAllQRCodes)
+    </script>
+</body>
+</html>
